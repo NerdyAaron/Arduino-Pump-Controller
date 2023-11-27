@@ -12,7 +12,7 @@ const int flowSensorPin = 2;
 const int relayPin = 9;
 const int batteryVoltagePin = A0;
 const int userInteractionPin = 13; // Pin for momentary switch
-
+int switchState = LOW; // Variable to store the state of the momentary switch
 
 // voltage to check for before running the pump
 const float batteryVoltageThreshold = 11.5; 
@@ -47,7 +47,7 @@ unsigned long lastBatteryReadingTime = 0;
 unsigned long backlightTimeout = 60000; // Timeout in milliseconds for LCD backlight
 unsigned long lastInteractionTime = 0; // Time of last user interaction
 bool backlightOn = false; // Flag to indicate backlight state
-
+unsigned long manualStartTime = 0; // Initialize manualStartTime to 0 used to store the pump start time when manual button is used
 
 //functions
 
@@ -96,10 +96,12 @@ void updateLCD() {
   }
 }
 
+//Function to turn the back light on when momentary switch is pressed - may look for more power saving in the future
 void userInteractionDetected() {
   lastInteractionTime = millis();
   backlightOn = true;
 }
+
 
 void setup() {
   // Set the relay pin as an output.
@@ -137,11 +139,50 @@ void loop() {
     lastBatteryReadingTime = millis();
   }
 
-if (millis() - lastInteractionTime >= backlightTimeout && backlightOn) {
-  backlightOn = false;
+  // Turn the backlight off if there has been no user interaction within backlightTimeout timer
+  if (millis() - lastInteractionTime >= backlightTimeout && backlightOn) {
+    backlightOn = false;
+  }
+
+
+  updateLCD();
+
+// Check if the momentary switch is pressed
+switchState = digitalRead(userInteractionPin);
+if (switchState == HIGH) {
+  if (manualStartTime == 0) {
+    manualStartTime = millis();
+  }
+  // Turn on the pump only if it's not already ON
+  if (pumpState != HIGH) {
+    pumpState = HIGH;
+    digitalWrite(relayPin, pumpState);
+    // Delay for 2 seconds to avoid someone chattering the pump.
+    delay(2000);
+  }
+} else {
+  // Turn off the pump only if it's not already OFF
+  if (pumpState != LOW) {
+    pumpState = LOW;
+    digitalWrite(relayPin, pumpState);
+
+    // Store last cycles ending pulseCount
+    endPulseCount = pulseCount;
+
+    //Update the total volume pumped
+    totalVolumePumped = calculateTotalCycleVolume();
+    
+    // If manual start time was set, update totalRunTime
+    if (manualStartTime != 0) {
+      totalRunTime += millis() - manualStartTime;
+      manualStartTime = 0;
+    }
+
+
+
+  }
 }
 
-updateLCD();
 
   // Check if it is time to turn on the pump.
   currentTimerState = millis();
@@ -190,7 +231,7 @@ updateLCD();
       // Store last cycles ending pulseCount
       endPulseCount = pulseCount;
 
-      
+    
     }
   }
 
