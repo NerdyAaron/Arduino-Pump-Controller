@@ -12,6 +12,8 @@ const int flowSensorPin = 2;
 const int relayPin = 9;
 const int batteryVoltagePin = A0;
 const int userInteractionPin = 13; // Pin for momentary switch
+const int pumpSwitchPin = 12; // Pin for momentary switch
+
 int switchState = LOW; // Variable to store the state of the momentary switch
 
 // voltage to check for before running the pump
@@ -94,12 +96,15 @@ void updateLCD() {
     lcd.print(" Gallons: ");
     lcd.print(totalVolumePumped);
   }
-}
+} else {
+        lcd.noBacklight(); // Turn off backlight
+        }
 
 //Function to turn the back light on when momentary switch is pressed - may look for more power saving in the future
 void userInteractionDetected() {
   lastInteractionTime = millis();
   backlightOn = true;
+  updateLCD(); 
 }
 
 
@@ -145,13 +150,15 @@ void loop() {
   }
 
 
-  updateLCD();
+  
 
-// Check if the momentary switch is pressed
-switchState = digitalRead(userInteractionPin);
+// Check if the pump manual switch is pressed
+switchState = digitalRead(pumpSwitchPin);
 if (switchState == HIGH) {
+  userInteractionDetected(); //Turn on backlight - may call updateLCD too frequently -keeps bl on while button pressed
   if (manualStartTime == 0) {
     manualStartTime = millis();
+    
   }
   // Turn on the pump only if it's not already ON
   if (pumpState != HIGH) {
@@ -178,7 +185,8 @@ if (switchState == HIGH) {
       manualStartTime = 0;
     }
 
-
+    // Update the previous pump cycle time to reset timer upon manual use
+      previousPumpCycleTime = millis();
 
   }
 }
