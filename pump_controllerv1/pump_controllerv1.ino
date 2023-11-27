@@ -14,7 +14,8 @@ const int batteryVoltagePin = A0;
 const int userInteractionPin = 13; // Pin for momentary switch
 const int pumpSwitchPin = 12; // Pin for momentary switch
 
-int switchState = LOW; // Variable to store the state of the momentary switch
+int userSwitchState = LOW; // Variable to store the state of the backlight switch (not used)
+int pumpSwitchState = LOW; // Variable to store the state of the manual pump switch
 
 // voltage to check for before running the pump
 const float batteryVoltageThreshold = 11.5; 
@@ -149,12 +150,9 @@ void loop() {
     backlightOn = false;
   }
 
-
-  
-
 // Check if the pump manual switch is pressed
-switchState = digitalRead(pumpSwitchPin);
-if (switchState == HIGH) {
+pumpSwitchState = digitalRead(pumpSwitchPin);
+if (pumpSwitchState == HIGH) {
   userInteractionDetected(); //Turn on backlight - may call updateLCD too frequently -keeps bl on while button pressed
   if (manualStartTime == 0) {
     manualStartTime = millis();
