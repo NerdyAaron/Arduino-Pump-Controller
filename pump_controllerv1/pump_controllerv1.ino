@@ -8,6 +8,9 @@
 // Create an instance of the LiquidCrystal_I2C class
 LiquidCrystal_I2C lcd(I2C_ADDRESS, 20, 4); //set the LCD address to 0x27 for a 20 chars and 4 line display
 
+float pumpCycleInterval = 900000; // milliseconds (15 minutes)
+float pumpOnTime = 30000; // milliseconds (30 seconds)
+
 const int flowSensorPin = 2;
 const int relayPin = 9;
 const int batteryVoltagePin = A0;
@@ -29,9 +32,6 @@ float totalVolumePumped = 0.0;
 
 
 volatile unsigned long pulseCount = 0;
-
-float pumpCycleInterval = 100000; // milliseconds (10 minutes)
-float pumpOnTime = 10000; // milliseconds (30 seconds)
 
 float batteryVoltage;
 float voltage;
@@ -96,10 +96,10 @@ void updateLCD() {
     lcd.setCursor(0, 3);
     lcd.print(" Gallons: ");
     lcd.print(totalVolumePumped);
-  }
-} else {
+    } else {
         lcd.noBacklight(); // Turn off backlight
         }
+  }
 
 //Function to turn the back light on when momentary switch is pressed - may look for more power saving in the future
 void userInteractionDetected() {
