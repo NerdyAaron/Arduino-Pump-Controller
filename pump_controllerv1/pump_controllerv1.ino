@@ -1,6 +1,9 @@
 #include <Arduino.h>
 #include <Wire.h>
 #include <LiquidCrystal_I2C.h>
+#include <ThreeWire.h>  
+#include <RtcDS1302.h>
+#include <LowPower.h>
 
 // Define the I2C address of the LCD
 #define I2C_ADDRESS 0x27
@@ -10,18 +13,23 @@ LiquidCrystal_I2C lcd(I2C_ADDRESS, 20, 4); //set the LCD address to 0x27 for a 2
 
 float pumpCycleInterval = 900000; // milliseconds (15 minutes)
 float pumpOnTime = 30000; // milliseconds (30 seconds)
-
+float safetyDelay = 3000; // milliseconds to turn off pump if no water flow 
 const int flowSensorPin = 2;
 const int relayPin = 9;
 const int batteryVoltagePin = A0;
 const int userInteractionPin = 13; // Pin for momentary switch
 const int pumpSwitchPin = 12; // Pin for momentary switch
 
+// Define DS1302 clock pins
+const int CLK = 5;  // RTC Clock
+const int DAT = 4;  // RTC Data
+const int RST = 3;  // RTC Reset
+
 int userSwitchState = LOW; // Variable to store the state of the backlight switch (not used)
 int pumpSwitchState = LOW; // Variable to store the state of the manual pump switch
 
 // voltage to check for before running the pump
-const float batteryVoltageThreshold = 11.5; 
+const float batteryVoltageThreshold = 12; 
 
 // Declare a variable to store the total run time.
 unsigned long totalRunTime = 0;
@@ -29,7 +37,8 @@ unsigned long totalRunTime = 0;
 float currentCycleVolume = 0.0;
 float totalVolumePumped = 0.0;
 
-
+// Define a flag to track flow detection
+bool flowDetected = false;
 
 volatile unsigned long pulseCount = 0;
 
@@ -47,12 +56,16 @@ unsigned long lastCycleTime = 0;
 unsigned long endPulseCount = 0;
 unsigned long lastBatteryReadingTime = 0;
 
-unsigned long backlightTimeout = 60000; // Timeout in milliseconds for LCD backlight
+unsigned long backlightTimeout = 180000; // Timeout in milliseconds for LCD backlight
 unsigned long lastInteractionTime = 0; // Time of last user interaction
 bool backlightOn = false; // Flag to indicate backlight state
 unsigned long manualStartTime = 0; // Initialize manualStartTime to 0 used to store the pump start time when manual button is used
 
 //functions
+
+ThreeWire myWire(DAT, CLK, RST); // IO, SCLK, CE
+RtcDS1302<ThreeWire> Rtc(myWire);
+
 
 // Function to read the battery voltage
 float readBatteryVoltage() {
@@ -71,16 +84,24 @@ float calculateTotalCycleVolume() {
   return (pulseCount / 330) * 0.264172;
 }
 
+
 // Function to update the LCD display
 void updateLCD() {
   if (backlightOn) {
     lcd.backlight();
     lcd.setCursor(0, 0);
-    lcd.print("Next Pump:");
     lcd.print(timeRemaining / 60000);
-    lcd.print(" m ");
+    lcd.print(":");
     lcd.print((timeRemaining / 1000) % 60);
-    lcd.print(" s");
+    
+    
+    // Read and display the current time from the RTC
+    RtcDateTime currentTime = Rtc.GetDateTime();
+    
+    lcd.setCursor(15, 0); // Display time in the top right corner
+    lcd.print(currentTime.Hour());
+    lcd.print(":");
+    lcd.print(currentTime.Minute());
 
     lcd.setCursor(0, 1);
     lcd.print(" Battery:");
@@ -129,8 +150,15 @@ void setup() {
   // Initialize the serial monitor.
   Serial.begin(9600);
 
-  // Initialize the LCD
+  // Initialize the LCD 
   lcd.init();
+  
+  // Initialize RTC
+  Rtc.Begin();
+  RtcDateTime compiled = RtcDateTime(__DATE__, __TIME__);
+  if (!Rtc.IsDateTimeValid()) {
+    Rtc.SetDateTime(compiled);
+  }
 }
 
 // Define the flowPulse function here
@@ -139,6 +167,13 @@ void flowPulse() {
 }
 
 void loop() {
+  RtcDateTime currentTime = Rtc.GetDateTime(); // Fetch current time
+  int currentHour = currentTime.Hour(); // Get current hour
+
+  if ((currentHour >= 18) || (currentHour < 8)) {
+    LowPower.powerDown(SLEEP_8S, ADC_OFF, BOD_OFF);
+  } else {
+
   // Read the battery voltage every minute
   if (lastBatteryReadingTime == 0 || millis() - lastBatteryReadingTime >= 60000) {
     batteryVoltage = readBatteryVoltage();
@@ -192,7 +227,7 @@ if (pumpSwitchState == HIGH) {
 
   // Check if it is time to turn on the pump.
   currentTimerState = millis();
-  if (currentTimerState >= previousPumpCycleTime + pumpCycleInterval) {
+    if(currentTimerState >= previousPumpCycleTime + pumpCycleInterval) {
     
     // Check if the battery voltage is above the threshold. Otherwise skip this round.
     if (batteryVoltage >= batteryVoltageThreshold) {
@@ -213,16 +248,55 @@ if (pumpSwitchState == HIGH) {
 
           //Update the total volume pumped
           totalVolumePumped = calculateTotalCycleVolume();
+          
+          //Safety Check to ensure pump is not running dry
+          endPulseCount = 0; //reset end count each loop and it will trigger the else safety check if there are no additional pulses after the 1 second delay
 
           // Update the LCD display
           updateLCD();
 
           // Delay for 1 second.
-          delay(1000);
+          delay(1000);        
+      } else {
+      //check if pump has been on for safetDelay without water flow 
+      if (millis() - startTime > safetyDelay){
+      // Turn off the pump.
+      pumpState = LOW;
+      digitalWrite(relayPin, pumpState);
 
-        }
+      // Stop the timer and calculate the total run time.
+      unsigned long endTime = millis();
+      totalRunTime += endTime - startTime;
+
+      // Update the previous pump cycle time.
+      previousPumpCycleTime = currentTimerState;
+
+      // Store last cycles ending pulseCount
+      endPulseCount = pulseCount;
+      
+    // Display error message
+    lcd.clear();
+    backlightOn = true;
+    lcd.setCursor(0, 0);
+    lcd.print("No Flow Detected.");
+    lcd.setCursor(0, 1);
+    lcd.print("Press Button to Restart.");
+    
+    //Add ability to have flashing error notification LED
+
+    // Wait for user interaction
+    while (digitalRead(userInteractionPin) == LOW) {
+      delay(100);
+    }
+
+    // Reset flow flag
+    flowDetected = false;
+
+    // Clear error message
+    lcd.clear();
+          }
+              }
       }
-
       // Turn off the pump.
       pumpState = LOW;
       digitalWrite(relayPin, pumpState);
@@ -246,6 +320,6 @@ if (pumpSwitchState == HIGH) {
 
 
 
-  // Delay for 1 second.
-  delay(1000);
+  // Delay for 500 milli seconds.
+  delay(500);
 }
