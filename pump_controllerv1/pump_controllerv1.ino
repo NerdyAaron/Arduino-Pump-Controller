@@ -17,13 +17,13 @@ float safetyDelay = 3000; // milliseconds to turn off pump if no water flow
 const int flowSensorPin = 2;
 const int relayPin = 9;
 const int batteryVoltagePin = A0;
-const int userInteractionPin = 13; // Pin for momentary switch
+const int userInteractionPin = 3; // Pin for momentary switch
 const int pumpSwitchPin = 12; // Pin for momentary switch
 
 // Define DS1302 clock pins
 const int CLK = 5;  // RTC Clock
 const int DAT = 4;  // RTC Data
-const int RST = 3;  // RTC Reset
+const int RST = 6;  // RTC Reset
 
 int userSwitchState = LOW; // Variable to store the state of the backlight switch (not used)
 int pumpSwitchState = LOW; // Variable to store the state of the manual pump switch
@@ -66,6 +66,23 @@ unsigned long manualStartTime = 0; // Initialize manualStartTime to 0 used to st
 ThreeWire myWire(DAT, CLK, RST); // IO, SCLK, CE
 RtcDS1302<ThreeWire> Rtc(myWire);
 
+#define countof(a) (sizeof(a) / sizeof(a[0]))
+
+void printDateTime(const RtcDateTime& dt) {
+  char datestring[20];
+
+  snprintf_P(datestring,
+             countof(datestring),
+             PSTR("%02u/%02u/%04u %02u:%02u:%02u"),
+             dt.Month(),
+             dt.Day(),
+             dt.Year(),
+             dt.Hour(),
+             dt.Minute(),
+             dt.Second());
+  Serial.print(datestring);
+}
+
 
 // Function to read the battery voltage
 float readBatteryVoltage() {
@@ -87,21 +104,39 @@ float calculateTotalCycleVolume() {
 
 // Function to update the LCD display
 void updateLCD() {
-  if (backlightOn) {
+ // if (backlightOn) {
     lcd.backlight();
+
+    //Display a count down until next pump run
     lcd.setCursor(0, 0);
-    lcd.print(timeRemaining / 60000);
-    lcd.print(":");
+    lcd.print(timeRemaining / 60000); // Display minutes
+
+    // Add leading zero if necessary
+    if ((timeRemaining / 1000) % 60 < 10) {
+      lcd.print(":0");
+    } else {
+      lcd.print(":");
+    }
+
+    // Display seconds
     lcd.print((timeRemaining / 1000) % 60);
     
     
     // Read and display the current time from the RTC
+    // Get current time from RTC module
     RtcDateTime currentTime = Rtc.GetDateTime();
-    
-    lcd.setCursor(15, 0); // Display time in the top right corner
-    lcd.print(currentTime.Hour());
+
+    // Convert hours to a two-digit format
+    String formattedHours = currentTime.Hour() < 10 ? "0" + String(currentTime.Hour()) : String(currentTime.Hour());
+
+    // Format minutes to two-digit format
+    String formattedMinutes = currentTime.Minute() < 10 ? "0" + String(currentTime.Minute()) : String(currentTime.Minute());
+
+    // Display time in military format on the LCD
+    lcd.setCursor(15, 0);
+    lcd.print(formattedHours);
     lcd.print(":");
-    lcd.print(currentTime.Minute());
+    lcd.print(formattedMinutes);;
 
     lcd.setCursor(0, 1);
     lcd.print(" Battery:");
@@ -109,24 +144,45 @@ void updateLCD() {
 
     lcd.setCursor(0, 2);
     lcd.print(" Run Time: ");
-    lcd.print(totalRunTime / 60000);
-    lcd.print(" m ");
-    lcd.print((totalRunTime / 1000) % 60);
-    lcd.print(" s ");
+    
+    // Convert totalRunTime to hours, minutes, and seconds
+    unsigned long hours = totalRunTime / (60 * 60 * 1000);
+    unsigned long minutes = (totalRunTime / (60 * 1000)) % 60;
+    unsigned long seconds = (totalRunTime / 1000) % 60;
 
+    // Format the time with leading zeros
+    formattedHours = hours < 10 ? "0" + String(hours) : String(hours);
+    formattedMinutes = minutes < 10 ? "0" + String(minutes) : String(minutes);
+    String formattedSeconds = seconds < 10 ? "0" + String(seconds) : String(seconds);
+
+    // Display the formatted time on the LCD
+    lcd.print(formattedHours);
+    lcd.print(":");
+    lcd.print(formattedMinutes);
+    lcd.print(":");
+    lcd.print(formattedSeconds);
+  
     lcd.setCursor(0, 3);
     lcd.print(" Gallons: ");
     lcd.print(totalVolumePumped);
-    } else {
-        lcd.noBacklight(); // Turn off backlight
-        }
+  //  } else {
+  //      lcd.noBacklight(); // Turn off backlight
+  //      }
   }
 
 //Function to turn the back light on when momentary switch is pressed - may look for more power saving in the future
 void userInteractionDetected() {
+  // Clear the interrupt flag to prevent continuous triggering
+  detachInterrupt(digitalPinToInterrupt(userInteractionPin));
   lastInteractionTime = millis();
+  delayMicroseconds(10000); // Delay for 10 milliseconds
   backlightOn = true;
-  updateLCD(); 
+  Serial.println(" User Intaction Detected ");
+  //updateLCD(); 
+  userSwitchState = digitalRead(userInteractionPin);
+if (userSwitchState == HIGH) {
+  Serial.println(" User Switch Pressed ");
+}
 }
 
 
@@ -144,21 +200,59 @@ void setup() {
   attachInterrupt(digitalPinToInterrupt(flowSensorPin), flowPulse, RISING); // Trigger interrupt on rising edge
 
   // Set the user interaction pin as an input.
-  pinMode(userInteractionPin, INPUT);
-  attachInterrupt(digitalPinToInterrupt(userInteractionPin), userInteractionDetected, RISING); // Trigger interrupt on rising edge
+  pinMode(userInteractionPin, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(userInteractionPin), userInteractionDetected, FALLING); // Trigger interrupt on rising edge
 
   // Initialize the serial monitor.
   Serial.begin(9600);
 
+  Serial.println();
+  Serial.print("compiled: ");
+  Serial.print(__DATE__);
+  Serial.println(__TIME__);
+  Serial.println(" 11 ");
   // Initialize the LCD 
   lcd.init();
-  
+  Serial.println(" 12 ");
   // Initialize RTC
   Rtc.Begin();
+
+
   RtcDateTime compiled = RtcDateTime(__DATE__, __TIME__);
   if (!Rtc.IsDateTimeValid()) {
     Rtc.SetDateTime(compiled);
   }
+  
+
+  if (!Rtc.IsDateTimeValid()) {
+    // Common Causes:
+    //    1) first time you ran and the device wasn't running yet
+    //    2) the battery on the device is low or even missing
+
+    Serial.println("RTC lost confidence in the DateTime!");
+    Rtc.SetDateTime(compiled);
+  }
+
+ if (Rtc.GetIsWriteProtected()) {
+    Serial.println("RTC was write protected, enabling writing now");
+    Rtc.SetIsWriteProtected(false);
+  }
+
+  if (!Rtc.GetIsRunning()) {
+    Serial.println("RTC was not actively running, starting now");
+    Rtc.SetIsRunning(true);
+  }
+
+  RtcDateTime now = Rtc.GetDateTime();
+  if (now < compiled) {
+    Serial.println("RTC is older than compile time!  (Updating DateTime)");
+    Rtc.SetDateTime(compiled);
+  } else if (now > compiled) {
+    Serial.println("RTC is newer than compile time. (this is expected)");
+  } else if (now == compiled) {
+    Serial.println("RTC is the same as compile time! (not expected but all is fine)");
+  }
+  Serial.println(" End of setup funtion ");
 }
 
 // Define the flowPulse function here
@@ -167,12 +261,27 @@ void flowPulse() {
 }
 
 void loop() {
+  
   RtcDateTime currentTime = Rtc.GetDateTime(); // Fetch current time
+  printDateTime(currentTime);
+  Serial.println();
+  //Serial.println(" Check Point 1 ");
+  
+  if (!currentTime.IsValid()) {
+    // Common Causes:
+    //    1) the battery on the device is low or even missing and the power line was disconnected
+    Serial.println("RTC lost confidence in the DateTime!");
+  }
+
+
   int currentHour = currentTime.Hour(); // Get current hour
 
   if ((currentHour >= 18) || (currentHour < 8)) {
+    Serial.println(" Low Power Mode ");
     LowPower.powerDown(SLEEP_8S, ADC_OFF, BOD_OFF);
   } else {
+
+    updateLCD(); //LCD updates if we are not in low power mode
 
   // Read the battery voltage every minute
   if (lastBatteryReadingTime == 0 || millis() - lastBatteryReadingTime >= 60000) {
@@ -181,30 +290,46 @@ void loop() {
   }
 
   // Turn the backlight off if there has been no user interaction within backlightTimeout timer
-  if (millis() - lastInteractionTime >= backlightTimeout && backlightOn) {
-    backlightOn = false;
-  }
-
+  //if (millis() - lastInteractionTime >= backlightTimeout && backlightOn) {
+  //  backlightOn = false;
+  //  Serial.println(" Back Light Turned Off ");
+  //}
+Serial.println(" Pump Switch Check ");
 // Check if the pump manual switch is pressed
 pumpSwitchState = digitalRead(pumpSwitchPin);
 if (pumpSwitchState == HIGH) {
-  userInteractionDetected(); //Turn on backlight - may call updateLCD too frequently -keeps bl on while button pressed
+  Serial.println(" Pump Switch Pressed ");
+
   if (manualStartTime == 0) {
     manualStartTime = millis();
-    
+    //Delay for half a second
+    delay(500);
   }
   // Turn on the pump only if it's not already ON
   if (pumpState != HIGH) {
     pumpState = HIGH;
+    Serial.println(" Turning Pump On ");
     digitalWrite(relayPin, pumpState);
     // Delay for 2 seconds to avoid someone chattering the pump.
     delay(2000);
+    
   }
+
+if (manualStartTime != 0) {
+      totalRunTime += millis() - manualStartTime;
+      manualStartTime = 0;
+      
+    }
+    Serial.print( "Total Run Time ");
+    Serial.println(totalRunTime);
+    updateLCD();
+
 } else {
   // Turn off the pump only if it's not already OFF
   if (pumpState != LOW) {
     pumpState = LOW;
     digitalWrite(relayPin, pumpState);
+    Serial.println( "Turn Pump Off ");
 
     // Store last cycles ending pulseCount
     endPulseCount = pulseCount;
@@ -224,7 +349,7 @@ if (pumpSwitchState == HIGH) {
   }
 }
 
-
+  //Serial.println( " Check time to turn on pump ");
   // Check if it is time to turn on the pump.
   currentTimerState = millis();
     if(currentTimerState >= previousPumpCycleTime + pumpCycleInterval) {
@@ -281,6 +406,7 @@ if (pumpSwitchState == HIGH) {
     lcd.print("No Flow Detected.");
     lcd.setCursor(0, 1);
     lcd.print("Press Button to Restart.");
+    Serial.println(" No Flow Detected Error ");
     
     //Add ability to have flashing error notification LED
 
@@ -311,9 +437,9 @@ if (pumpSwitchState == HIGH) {
       // Store last cycles ending pulseCount
       endPulseCount = pulseCount;
 
-    
     }
-  }
+    }
+   }
 
   // Calculate the time remaining until the next pump cycle.
   timeRemaining = pumpCycleInterval - (currentTimerState - previousPumpCycleTime);
