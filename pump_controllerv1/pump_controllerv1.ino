@@ -108,18 +108,19 @@ void updateLCD() {
     lcd.backlight();
 
     //Display a count down until next pump run
+    // Calculate minutes and seconds from the remaining time
+    unsigned long minutes = timeRemaining / 60;
+    unsigned long seconds = timeRemaining % 60;
+
+    // Format the minutes and seconds with leading zeros
+    String formattedMinutes = 2 > 1 ? (minutes < 10 ? "0" : "") + String(minutes) : String(minutes);
+    String formattedSeconds = 2 > 1 ? (seconds < 10 ? "0" : "") + String(seconds) : String(seconds);
+
+    // Display the formatted time on the LCD
     lcd.setCursor(0, 0);
-    lcd.print(timeRemaining / 60000); // Display minutes
-
-    // Add leading zero if necessary
-    if ((timeRemaining / 1000) % 60 < 10) {
-      lcd.print(":0");
-    } else {
-      lcd.print(":");
-    }
-
-    // Display seconds
-    lcd.print((timeRemaining / 1000) % 60);
+    lcd.print(formattedMinutes);
+    lcd.print(":");
+    lcd.print(formattedSeconds);
     
     
     // Read and display the current time from the RTC
@@ -130,7 +131,7 @@ void updateLCD() {
     String formattedHours = currentTime.Hour() < 10 ? "0" + String(currentTime.Hour()) : String(currentTime.Hour());
 
     // Format minutes to two-digit format
-    String formattedMinutes = currentTime.Minute() < 10 ? "0" + String(currentTime.Minute()) : String(currentTime.Minute());
+    formattedMinutes = currentTime.Minute() < 10 ? "0" + String(currentTime.Minute()) : String(currentTime.Minute());
 
     // Display time in military format on the LCD
     lcd.setCursor(15, 0);
@@ -147,13 +148,13 @@ void updateLCD() {
     
     // Convert totalRunTime to hours, minutes, and seconds
     unsigned long hours = totalRunTime / (60 * 60 * 1000);
-    unsigned long minutes = (totalRunTime / (60 * 1000)) % 60;
-    unsigned long seconds = (totalRunTime / 1000) % 60;
+    minutes = (totalRunTime / (60 * 1000)) % 60;
+    seconds = (totalRunTime / 1000) % 60;
 
     // Format the time with leading zeros
     formattedHours = hours < 10 ? "0" + String(hours) : String(hours);
     formattedMinutes = minutes < 10 ? "0" + String(minutes) : String(minutes);
-    String formattedSeconds = seconds < 10 ? "0" + String(seconds) : String(seconds);
+    formattedSeconds = seconds < 10 ? "0" + String(seconds) : String(seconds);
 
     // Display the formatted time on the LCD
     lcd.print(formattedHours);
