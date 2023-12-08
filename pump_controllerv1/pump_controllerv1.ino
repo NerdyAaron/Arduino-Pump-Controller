@@ -29,7 +29,7 @@ int userSwitchState = LOW; // Variable to store the state of the backlight switc
 int pumpSwitchState = LOW; // Variable to store the state of the manual pump switch
 
 // voltage to check for before running the pump
-const float batteryVoltageThreshold = 12; 
+const float batteryVoltageThreshold = 12.5; 
 
 // Declare a variable to store the total run time.
 unsigned long totalRunTime = 0;
@@ -88,7 +88,7 @@ void printDateTime(const RtcDateTime& dt) {
 float readBatteryVoltage() {
   int adcReading = analogRead(A0);
   float voltage = adcReading * 4.9 / 1023;
-  return voltage * 2.85;
+  return voltage * 3.32;
 }
 
 // Function to calculate the current cycle volume
@@ -104,23 +104,21 @@ float calculateTotalCycleVolume() {
 
 // Function to update the LCD display
 void updateLCD() {
- // if (backlightOn) {
+  if (backlightOn) {
     lcd.backlight();
 
-    //Display a count down until next pump run
-    // Calculate minutes and seconds from the remaining time
-    unsigned long minutes = timeRemaining / 60;
-    unsigned long seconds = timeRemaining % 60;
+//Display a count down until next pump run
+// Calculate minutes and seconds from the remaining time
+unsigned long minutes = timeRemaining / 60000; // Convert milliseconds to minutes
+unsigned long seconds = (timeRemaining / 1000) % 60; //Convert milliseconds to seconds
 
-    // Format the minutes and seconds with leading zeros
-    String formattedMinutes = 2 > 1 ? (minutes < 10 ? "0" : "") + String(minutes) : String(minutes);
-    String formattedSeconds = 2 > 1 ? (seconds < 10 ? "0" : "") + String(seconds) : String(seconds);
+String formattedMinutes = (minutes < 10) ? "0" + String(minutes) : String(minutes);
+String formattedSeconds = (seconds < 10) ? "0" + String(seconds) : String(seconds);
 
-    // Display the formatted time on the LCD
-    lcd.setCursor(0, 0);
-    lcd.print(formattedMinutes);
-    lcd.print(":");
-    lcd.print(formattedSeconds);
+
+// Display the formatted time on the LCD
+lcd.setCursor(0, 0);
+lcd.print(formattedMinutes + ":" + formattedSeconds);
     
     
     // Read and display the current time from the RTC
@@ -140,11 +138,7 @@ void updateLCD() {
     lcd.print(formattedMinutes);;
 
     lcd.setCursor(0, 1);
-    lcd.print(" Battery:");
-    lcd.print(batteryVoltage);
-
-    lcd.setCursor(0, 2);
-    lcd.print(" Run Time: ");
+    lcd.print("Run Time: ");
     
     // Convert totalRunTime to hours, minutes, and seconds
     unsigned long hours = totalRunTime / (60 * 60 * 1000);
@@ -163,12 +157,16 @@ void updateLCD() {
     lcd.print(":");
     lcd.print(formattedSeconds);
   
-    lcd.setCursor(0, 3);
-    lcd.print(" Gallons: ");
+    lcd.setCursor(0, 2);
+    lcd.print("Gallons: ");
     lcd.print(totalVolumePumped);
-  //  } else {
-  //      lcd.noBacklight(); // Turn off backlight
-  //      }
+
+    lcd.setCursor(0, 3);
+    lcd.print("Battery:");
+    lcd.print(batteryVoltage);
+    } else {
+       lcd.noBacklight(); // Turn off backlight
+        }
   }
 
 //Function to turn the back light on when momentary switch is pressed - may look for more power saving in the future
@@ -178,12 +176,17 @@ void userInteractionDetected() {
   lastInteractionTime = millis();
   delayMicroseconds(10000); // Delay for 10 milliseconds
   backlightOn = true;
-  Serial.println(" User Intaction Detected ");
-  //updateLCD(); 
-  userSwitchState = digitalRead(userInteractionPin);
-if (userSwitchState == HIGH) {
-  Serial.println(" User Switch Pressed ");
-}
+  Serial.println(" User Interaction Detected ");
+  
+  // Check if enough time has passed since the last interaction
+  if (millis() - lastInteractionTime > 1000) { // Adjust the debounce time as needed
+    userSwitchState = digitalRead(userInteractionPin);
+    if (userSwitchState == LOW) { // Check for LOW state when the switch is pressed
+      Serial.println(" User Switch Pressed ");
+    }
+  }
+  
+  attachInterrupt(digitalPinToInterrupt(userInteractionPin), userInteractionDetected, FALLING); // Re-attach interrupt
 }
 
 
@@ -207,14 +210,9 @@ void setup() {
   // Initialize the serial monitor.
   Serial.begin(9600);
 
-  Serial.println();
-  Serial.print("compiled: ");
-  Serial.print(__DATE__);
-  Serial.println(__TIME__);
-  Serial.println(" 11 ");
   // Initialize the LCD 
   lcd.init();
-  Serial.println(" 12 ");
+  
   // Initialize RTC
   Rtc.Begin();
 
@@ -277,7 +275,7 @@ void loop() {
 
   int currentHour = currentTime.Hour(); // Get current hour
 
-  if ((currentHour >= 18) || (currentHour < 8)) {
+  if ((currentHour >= 18) || (currentHour < 6)) {
     Serial.println(" Low Power Mode ");
     LowPower.powerDown(SLEEP_8S, ADC_OFF, BOD_OFF);
   } else {
