@@ -11,8 +11,11 @@
 // Create an instance of the LiquidCrystal_I2C class
 LiquidCrystal_I2C lcd(I2C_ADDRESS, 20, 4); //set the LCD address to 0x27 for a 20 chars and 4 line display
 
-float pumpCycleInterval = 900000; // milliseconds (15 minutes)
-float pumpOnTime = 30000; // milliseconds (30 seconds)
+//Debugging
+float morningTime = 8; //Hour to exit sleep mode
+float nightTime = 16; //Military time hour to enter sleep mode
+float pumpCycleInterval = 60000; // milliseconds (15 minutes)
+float pumpOnTime = 40000; // milliseconds (40 seconds)
 float safetyDelay = 3000; // milliseconds to turn off pump if no water flow 
 const int flowSensorPin = 2;
 const int relayPin = 9;
@@ -56,7 +59,7 @@ unsigned long lastCycleTime = 0;
 unsigned long endPulseCount = 0;
 unsigned long lastBatteryReadingTime = 0;
 
-unsigned long backlightTimeout = 180000; // Timeout in milliseconds for LCD backlight
+unsigned long backlightTimeout = 600000; // Timeout in milliseconds for LCD backlight
 unsigned long lastInteractionTime = 0; // Time of last user interaction
 bool backlightOn = false; // Flag to indicate backlight state
 unsigned long manualStartTime = 0; // Initialize manualStartTime to 0 used to store the pump start time when manual button is used
@@ -86,9 +89,18 @@ void printDateTime(const RtcDateTime& dt) {
 
 // Function to read the battery voltage
 float readBatteryVoltage() {
+  analogReference(DEFAULT); // Set the analog reference to the default (usually 5V)
   int adcReading = analogRead(A0);
   float voltage = adcReading * 4.9 / 1023;
-  return voltage * 3.32;
+  Serial.print("ADC: ");
+  Serial.println(adcReading);
+  Serial.print("Voltage: ");
+  Serial.println(voltage);
+  voltage = voltage *3.1; //Bridge multiplier
+   Serial.print("Final: ");
+  Serial.println(voltage);
+  return voltage;
+ 
 }
 
 // Function to calculate the current cycle volume
@@ -104,7 +116,7 @@ float calculateTotalCycleVolume() {
 
 // Function to update the LCD display
 void updateLCD() {
-  if (backlightOn) {
+
     lcd.backlight();
 
 //Display a count down until next pump run
@@ -137,25 +149,32 @@ lcd.print(formattedMinutes + ":" + formattedSeconds);
     lcd.print(":");
     lcd.print(formattedMinutes);;
 
+    // Calculate minutes and seconds from the remaining time
+    unsigned long runTimeHours = totalRunTime / 3600000; //Convert milliseconds to hours
+    unsigned long runTimeMinutes = totalRunTime / 60000; // Convert milliseconds to minutes
+    unsigned long runTimeSeconds = (totalRunTime / 1000) % 60; //Convert milliseconds to seconds
+
+    // Format the run time with leading zeros
+    String formattedrunTimeHours = runTimeHours < 10 ? "0" + String(runTimeHours) : String(runTimeHours);
+    String formattedrunTimeMinutes = runTimeMinutes < 10 ? "0" + String(runTimeMinutes) : String(runTimeMinutes);
+    String formattedrunTimeSeconds = runTimeSeconds < 10 ? "0" + String(runTimeSeconds) : String(runTimeSeconds);
+
+    // Display the formatted run time on the LCD
     lcd.setCursor(0, 1);
     lcd.print("Run Time: ");
-    
-    // Convert totalRunTime to hours, minutes, and seconds
-    unsigned long hours = totalRunTime / (60 * 60 * 1000);
-    minutes = (totalRunTime / (60 * 1000)) % 60;
-    seconds = (totalRunTime / 1000) % 60;
-
-    // Format the time with leading zeros
-    formattedHours = hours < 10 ? "0" + String(hours) : String(hours);
-    formattedMinutes = minutes < 10 ? "0" + String(minutes) : String(minutes);
-    formattedSeconds = seconds < 10 ? "0" + String(seconds) : String(seconds);
-
-    // Display the formatted time on the LCD
-    lcd.print(formattedHours);
+    lcd.print(formattedrunTimeHours);
     lcd.print(":");
-    lcd.print(formattedMinutes);
+    lcd.print(formattedrunTimeMinutes);
     lcd.print(":");
-    lcd.print(formattedSeconds);
+    lcd.print(formattedrunTimeSeconds);
+
+    //Debugging
+    Serial.print("Run Time: ");
+    Serial.print(formattedHours);
+    Serial.print(":");
+    Serial.print(formattedMinutes);
+    Serial.print(":");
+    Serial.print(formattedSeconds);
   
     lcd.setCursor(0, 2);
     lcd.print("Gallons: ");
@@ -164,9 +183,7 @@ lcd.print(formattedMinutes + ":" + formattedSeconds);
     lcd.setCursor(0, 3);
     lcd.print("Battery:");
     lcd.print(batteryVoltage);
-    } else {
-       lcd.noBacklight(); // Turn off backlight
-        }
+    
   }
 
 //Function to turn the back light on when momentary switch is pressed - may look for more power saving in the future
@@ -176,7 +193,7 @@ void userInteractionDetected() {
   lastInteractionTime = millis();
   delayMicroseconds(10000); // Delay for 10 milliseconds
   backlightOn = true;
-  Serial.println(" User Interaction Detected ");
+  //Serial.println(" User Interaction Detected ");
   
   // Check if enough time has passed since the last interaction
   if (millis() - lastInteractionTime > 1000) { // Adjust the debounce time as needed
@@ -262,8 +279,8 @@ void flowPulse() {
 void loop() {
   
   RtcDateTime currentTime = Rtc.GetDateTime(); // Fetch current time
-  printDateTime(currentTime);
-  Serial.println();
+  //printDateTime(currentTime);
+  //Serial.println();
   //Serial.println(" Check Point 1 ");
   
   if (!currentTime.IsValid()) {
@@ -275,7 +292,7 @@ void loop() {
 
   int currentHour = currentTime.Hour(); // Get current hour
 
-  if ((currentHour >= 18) || (currentHour < 6)) {
+  if ((currentHour >= nightTime) || (currentHour < morningTime)) {
     Serial.println(" Low Power Mode ");
     LowPower.powerDown(SLEEP_8S, ADC_OFF, BOD_OFF);
   } else {
@@ -283,17 +300,17 @@ void loop() {
     updateLCD(); //LCD updates if we are not in low power mode
 
   // Read the battery voltage every minute
-  if (lastBatteryReadingTime == 0 || millis() - lastBatteryReadingTime >= 60000) {
+  if (lastBatteryReadingTime == 0 || millis() - lastBatteryReadingTime >= 15000) {
     batteryVoltage = readBatteryVoltage();
     lastBatteryReadingTime = millis();
   }
 
-  // Turn the backlight off if there has been no user interaction within backlightTimeout timer
-  //if (millis() - lastInteractionTime >= backlightTimeout && backlightOn) {
-  //  backlightOn = false;
-  //  Serial.println(" Back Light Turned Off ");
-  //}
-Serial.println(" Pump Switch Check ");
+  // Turn the backlight off if there has been no user interaction OR PUMP within backlightTimeout timer
+  if (millis() - lastInteractionTime >= backlightTimeout && backlightOn) {
+    backlightOn = false; //should be false when we want to use. keeping it on for dev
+    Serial.println(" Back Light Turned Off ");
+  }
+//Serial.println(" Pump Switch Check ");
 // Check if the pump manual switch is pressed
 pumpSwitchState = digitalRead(pumpSwitchPin);
 if (pumpSwitchState == HIGH) {
@@ -309,7 +326,9 @@ if (pumpSwitchState == HIGH) {
     pumpState = HIGH;
     Serial.println(" Turning Pump On ");
     digitalWrite(relayPin, pumpState);
-    // Delay for 2 seconds to avoid someone chattering the pump.
+    backlightOn = true;
+    updateLCD();
+    // Delay for 2 seconds to avoid someone chattering the pump. Move this to a check before turing the pump off - same safety check but starts the timer 
     delay(2000);
     
   }
@@ -321,6 +340,9 @@ if (manualStartTime != 0) {
     }
     Serial.print( "Total Run Time ");
     Serial.println(totalRunTime);
+    lastInteractionTime = millis(); 
+    backlightOn = true;
+
     updateLCD();
 
 } else {
@@ -348,7 +370,6 @@ if (manualStartTime != 0) {
   }
 }
 
-  //Serial.println( " Check time to turn on pump ");
   // Check if it is time to turn on the pump.
   currentTimerState = millis();
     if(currentTimerState >= previousPumpCycleTime + pumpCycleInterval) {
